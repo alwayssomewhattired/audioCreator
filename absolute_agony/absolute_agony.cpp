@@ -1,9 +1,11 @@
+
+#define _USE_MATH_DEFINES
 #include <iostream>
 #include <vector>
 #include <sndfile.h>
 #include <fftw3.h>
 #include <fstream>
-
+#include <cmath>
 
 
 
@@ -53,6 +55,32 @@ std::vector<double> read_audio_file(const std::string& filename)
 }
 
 
+// create function to apply a hanning window 
+void applyHanningWindow(std::vector<double>& signal, int n) {
+	for (int i = 0; i < n; i++) {
+		double hannValue = 0.5 * (1 - cos(2 * M_PI * i / (n - 1)));
+		signal[i] *= hannValue;
+	}
+}
+
+std::vector<double> sampleStorage;
+
+// create a function for finding and storing prominent frequency samples
+bool isGreaterThanAll(std::vector<double>& vec, double value, int counter, std::vector<double>& samples, int CHUNK_SIZE) {
+	for (double element : vec) {
+		if (value < element) {
+			return false;
+		} 
+	}
+	int CHUNK_SLICE_START = counter * CHUNK_SIZE;
+	int CHUNK_SLICE_END = CHUNK_SLICE_START + CHUNK_SIZE;
+	//store samples
+	for (int i = CHUNK_SLICE_START; i < CHUNK_SLICE_END; ++i) {
+		std::cout << "stored samples!!!: " << samples[i] << std::endl;
+		sampleStorage.push_back(samples[i]);
+	}
+	return true;
+}
 
 
 
@@ -84,6 +112,8 @@ int main()
 
 	int chunk_size = 2048;
 
+	applyHanningWindow(audio_data, n);
+
 	int num_chunks = (n + chunk_size - 1) / chunk_size; // calculate all the number of chunks
 
 
@@ -105,10 +135,13 @@ int main()
 	// create vector for magnitude storage
 	std::vector<double> magnitudes(chunk_size);
 
+	int counter = -1;
 
 	// loop over each chunk
 	for (int chunk = 0; chunk < num_chunks; ++chunk) {
+		++counter;
 		std::cout << "chunk: " << chunk << std::endl;
+		std::cout << "counter: " << counter << std::endl;
 		// Determine the starting and ending index for the chunk
 		int start = chunk * chunk_size;
 		int end = std::min(start + chunk_size, n);
@@ -126,12 +159,16 @@ int main()
 		if (outputFile.is_open()) {
 			// process the complex output
 			for (int i = 0; i < fft_size; ++i) {
+				//std::cout << "samples: " << i << " " << audio_data[i + chunk_size] << std::endl;
 				double freq = static_cast<double>(i) * sampleRate / chunk_size;
 				magnitudes[i] = std::sqrt(complex_output[i][0] * complex_output[i][0]
 					+ complex_output[i][1] * complex_output[i][1]);
 				outputFile << "bin " << i << ": Frequency = " << freq << " Hz, magnitude = "
 					<< magnitudes[i] << "\n";
 			}
+
+			//check magnitudes for wanted frequencies
+			isGreaterThanAll(magnitudes, magnitudes[23], counter, audio_data, chunk_size);
 		}
 
 	}

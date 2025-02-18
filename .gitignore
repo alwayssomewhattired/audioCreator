@@ -371,3 +371,7 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+/absolute_agony/mag.txt
+/absolute_agony/mag_immediate.txt
+/absolute_agony/new_fft.txt
+/absolute_agony/output.wav

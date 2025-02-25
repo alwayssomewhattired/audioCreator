@@ -1,7 +1,8 @@
 
 #define _USE_MATH_DEFINES
 // websockets
-#include <winsock.h> // This creates naming conflicts
+#include <winsock.h> 
+
 #include <iostream>
 #include <vector>
 #include <sndfile.h>
@@ -55,71 +56,81 @@ int websocket(std::vector<double> sampleStorage)
 		std::cerr << "WSAStartup failed. \n";
 		return 1;
 	}
+	
+		// Initialize socket
+	SOCKET sock = 0;
 
-	// Create socket
-	SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
-	if (sock == INVALID_SOCKET) {
-		std::cerr << "Socket creation failed.\n";
-		WSACleanup();
-		return 1;
-	}
-	// Server address structure
-	sockaddr_in server_addr{};
-	server_addr.sin_family = AF_INET;
-	server_addr.sin_port = htons(PORT);
-	server_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+	while (true) { // This while loop is janked
 
-	// Connect to server
-	if (connect(sock, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
-		std::cerr << "Connection to server failed.\n";
+		// Define socket
+		sock = socket(AF_INET, SOCK_STREAM, 0);
+
+		// Test the validity of socket
+		if (sock == INVALID_SOCKET) {
+			std::cerr << "Socket creation failed.\n";
+			WSACleanup();
+			return 1;
+		}
+		// Server address structure
+		sockaddr_in server_addr{};
+		server_addr.sin_family = AF_INET;
+		server_addr.sin_port = htons(PORT);
+		server_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+
+		// Connect to server
+		if (connect(sock, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+			std::cerr << "Connection to server failed.\n";
+			closesocket(sock);
+			std::this_thread::sleep_for(std::chrono::seconds(2));
+		}
+		else {
+			std::cout << "Connected!" << std::endl;
+			break;
+		}
+	} // end of while loop
+
+		// Check if we have enough data 
+		if (sampleStorage.size() >= 720000) {
+			const char* message = "finish_now";
+			send(sock, message, strlen(message), 0);
 		closesocket(sock);
 		WSACleanup();
-		return 1;
-	}
+		return 0;
+		}
 
-	if (sampleStorage.size() >= 720000) {
-		const char* message = "finish_now";
-		send(sock, message, strlen(message), 0);
-	
-	// Cleanup
-	closesocket(sock);
-	WSACleanup();
+		// Send command to Python server
+		const char* message = "run_function";
+		
+		// Send and check if command sent successfully
+		std::cout << sock << std::endl;
+		if (send(sock, message, strlen(message), 0) == SOCKET_ERROR) {
+			std::cerr << "Message send failed!" << std::endl;
+			closesocket(sock);
+			WSACleanup();
+			return 1;
+		}
 
-	return 0;
-	}
 
-	// Send command to Python server
-	const char* message = "run_function";
-	send(sock, message, strlen(message), 0);
+		std::cout << "Command sent to Python server.\n";
 
-	std::cout << "Command sent to Python server.\n";
+		// Receive message
+		int bytesReceived = recv(sock, receivedBuffer, sizeof(receivedBuffer) - 1, 0);
+		if (bytesReceived > 0) {
+			receivedBuffer[bytesReceived] = '\0'; // NuLL-terminate received data
+			std::string str(receivedBuffer);
+			size_t pos = str.find(":");
+			std::string substring = str.substr(pos + 1);
+			std::cout << "Received from server: " << receivedBuffer << std::endl;
+			std::cout << "Chopped string: " << substring << std::endl;
+		}
+		else {
+			std::cerr << "Failed to receive message\n";
+		}
 
-	// Receive message
-	int bytesReceived = recv(sock, receivedBuffer, sizeof(receivedBuffer) - 1, 0);
-	if (bytesReceived > 0) {
-		receivedBuffer[bytesReceived] = '\0'; // NuLL-terminate received data
-		std::string str(receivedBuffer);
-		size_t pos = str.find(":");
-		std::string substring = str.substr(pos + 1);
-		std::cout << "Received from server: " << receivedBuffer << std::endl;
-		std::cout << "Chopped string: " << substring << std::endl;
-	}
-	else {
-		std::cerr << "Failed to receive message\n";
-	}
+		// Cleanup
+		closesocket(sock);
+		WSACleanup();
 
-	//if (sampleStorage.size() > 720000) {
-
-	//	message = "finish_now";
-	//	send(sock, message, strlen(message), 0);
-	//	std::cout << "END" << std::endl;
-	//}
-
-	//	// Cleanup
-	//	closesocket(sock);
-	//	WSACleanup();
-
-	//return 0;
 	return 0;
 }
 
@@ -205,8 +216,8 @@ bool isGreaterThanAll(std::vector<double>& vec, double value, int counter,
 		else if (samples[i] > 1) {
 			samples[i] = 1;
 		}
-		//sampleStorage.emplace_back(samples[i]); // This might be breaking 
-		sampleStorage.push_back(samples[i]); // This might fix it
+		//sampleStorage.emplace_back(samples[i]); // This might be breaking					I don't know
+		sampleStorage.push_back(samples[i]); // This might fix it							which is better...
 		//std::cout << "stored samples!!!: " << samples[i] << std::endl;
 	}
 	return true;
@@ -256,7 +267,6 @@ void ReadAudioFileFromS3(const Aws::String& bucketName, const Aws::String& objec
 
 int main()
 {
-
 		const Aws::String bucketName = "firstdemoby";
 		const Aws::String objectKey = "fetch-test.mp3";
 

@@ -14,15 +14,18 @@
 #include <aws/core/Aws.h>
 #include <aws/s3/S3Client.h>
 #include <aws/s3/model/GetObjectRequest.h>
+#include <aws/s3/model/putObjectRequest.h>
+#include <aws/core/utils/Outcome.h>
+#include <aws/core/utils/DateTime.h>
 
 
 
 // to-do
 
+// if source audio is not stereo, process it instead of throwing an error.
+
 // I think I'm applying window effect to the actual signal. The resulting audio fades in and out. I should apply the 
 // window to a reference to the actual audio instead.
-
-// send fetched python audio to here
 
 // samples clip at times (past -1 or 1). Might be because of uninitialize sampleStorage size.
 // initiaized sampleStorage size and still have issue...
@@ -37,6 +40,9 @@
 // add a normalisation feature that compresses the audio.
 
 // It takes a while to fetch audio from s3 and make the audio and then read the audio... more efficieny would be great.
+// It also takes a while to upload to s3.
+
+// Make a unique object key for every upload and send the key to server.
 
 
 
@@ -45,6 +51,8 @@
 
 #define PORT 5000
 #define SERVER_IP "127.0.0.1"
+
+int productDurationSamples = 96000;
 
 
 int websocket(std::vector<double> sampleStorage)
@@ -90,7 +98,7 @@ int websocket(std::vector<double> sampleStorage)
 	} // end of while loop
 
 		// Check if we have enough data 
-		if (sampleStorage.size() >= 720000) {
+		if (sampleStorage.size() >= productDurationSamples) {
 			const char* message = "finish_now";
 			send(sock, message, strlen(message), 0);
 		closesocket(sock);
@@ -133,9 +141,6 @@ int websocket(std::vector<double> sampleStorage)
 
 	return 0;
 }
-
-
-
 
 
 
@@ -287,7 +292,7 @@ int main()
 		int chunk_size = 2048;
 
 
-	while (sampleStorage.size() < 720000) {
+	while (sampleStorage.size() < productDurationSamples) {
 		std::cout << sampleStorage.size() << std::endl;
 		websocket(sampleStorage);
 		ReadAudioFileFromS3(bucketName, objectKey);
@@ -373,7 +378,7 @@ int main()
 		magFile.close();*/
 
 
-		if (sampleStorage.size() >= 720000) {
+		if (sampleStorage.size() >= productDurationSamples) {
 			// open wav file for writing
 			infiniteFile = sf_open(outputName, SFM_WRITE, &sf_info);
 			if (!infiniteFile) {
@@ -388,6 +393,47 @@ int main()
 			}
 
 			sf_close(infiniteFile);
+
+			// open the file to upload to s3
+			std::ifstream file_stream(outputName, std::ios::in | std::ios::binary);
+			if (!file_stream) {
+				std::cerr << "Error: Could not open " << outputName << " for s3 upload" << std::endl;
+				return 1;
+			}
+
+			// Initialize the AWS SDK
+			Aws::SDKOptions options;
+			Aws::InitAPI(options);
+
+			// Create S3 client
+			Aws::Client::ClientConfiguration config;
+			config.region = "us-east-2";
+			Aws::S3::S3Client s3_client(config);
+
+			// productKey
+			std::string productKey = "product.wav";
+
+			// Create a putObjectRequest
+			Aws::S3::Model::PutObjectRequest object_request;
+			object_request.SetBucket(bucketName);
+			object_request.SetKey(productKey);
+
+			// Attatch the file stream to the putObject Request
+			auto input_data = Aws::MakeShared<Aws::IOStream>("AllocTag", file_stream.rdbuf());
+			object_request.SetBody(input_data);
+
+			// Perform the file upload to S3
+			auto put_object_outcome = s3_client.PutObject(object_request);
+
+			if (put_object_outcome.IsSuccess()) {
+				std::cout << "Product successfully uploaded to S3!" << std::endl;
+			}
+			else {
+				std::cerr << "Error uploading product: " << put_object_outcome.GetError().GetMessage() << std::endl;
+			}
+
+			Aws::ShutdownAPI(options);
+
 		}
 
 		//clean up

@@ -18,6 +18,9 @@
 #include <aws/core/utils/Outcome.h>
 #include <aws/core/utils/DateTime.h>
 
+// Unique Key
+#include <iomanip>
+
 
 
 // to-do
@@ -52,7 +55,25 @@
 #define PORT 5000
 #define SERVER_IP "127.0.0.1"
 
+// Product length in samples
 int productDurationSamples = 96000;
+
+// timestamp-based id
+std::string generateTimestampID() {
+	auto now = std::chrono::system_clock::now();
+	auto time_t_now = std::chrono::system_clock::to_time_t(now);
+	auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+
+	std::tm tm_now;
+	localtime_s(&tm_now, &time_t_now); // Windows-safe localtime
+
+	std::stringstream ss;
+	ss << std::put_time(&tm_now, "%Y%m%d_%H%M%S") // Format: YYYYMMDD_HHMMSS
+		<< "_" << std::setfill('0') << std::setw(3) << milliseconds.count() //Add milliseconds
+		<< ".wav"; //.wav ofc :)
+
+	return ss.str();
+}
 
 
 int websocket(std::vector<double> sampleStorage)
@@ -411,7 +432,7 @@ int main()
 			Aws::S3::S3Client s3_client(config);
 
 			// productKey
-			std::string productKey = "product.wav";
+			std::string productKey = generateTimestampID();
 
 			// Create a putObjectRequest
 			Aws::S3::Model::PutObjectRequest object_request;

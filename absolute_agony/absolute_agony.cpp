@@ -1,7 +1,10 @@
 
 #define _USE_MATH_DEFINES
-// websockets
-#include <winsock.h> 
+
+
+// websockets (windows)
+//#include <winsock.h> 
+
 
 #include <iostream>
 #include <vector>
@@ -10,6 +13,14 @@
 #include <fstream>
 #include <cmath>
 
+// Unique Key
+#include <iomanip>
+
+
+// websockets (linux)
+#include <websocketpp/config/asio_no_tls_client.hpp>
+#include <websocketpp/client.hpp>
+
 // AWS
 #include <aws/core/Aws.h>
 #include <aws/s3/S3Client.h>
@@ -17,9 +28,6 @@
 #include <aws/s3/model/putObjectRequest.h>
 #include <aws/core/utils/Outcome.h>
 #include <aws/core/utils/DateTime.h>
-
-// Unique Key
-#include <iomanip>
 
 
 
@@ -48,12 +56,46 @@
 // Make a unique object key for every upload and send the key to server.
 
 
+typedef websocketpp::client<websocketpp::config::asio_client> client;
+typedef websocketpp::connection_hdl connection_hdl;
 
+bool connected = false;
 
-#pragma comment(lib, "ws2_32.lib") // Link Winsock library
+std::atomic<bool> task_done(false);
 
-#define PORT 5000
-#define SERVER_IP "127.0.0.1"
+// main thread blocking
+std::mutex mtx;
+std::condition_variable cv;
+bool condition_met = false;
+
+client c;
+websocketpp::connection_hdl hdl_global;  // Store connection handle for sending messages
+
+// Callback when a message is received
+void on_message(connection_hdl hdl, client::message_ptr msg) {
+	std::string payload = msg->get_payload(); // Get the message content
+	std::cout << "Received: " << payload << std::endl;
+	if (payload == "source_upload") {
+		std::cout << "Source has been uploaded!" << std::endl;
+		std::lock_guard<std::mutex> lock(mtx);
+		condition_met = true;
+		cv.notify_one();
+	}
+	return;
+}
+
+// Callback when connection is established
+void on_open(connection_hdl hdl) {
+	std::cout << "Connected to server!" << std::endl;
+	hdl_global = hdl;  // Store the connection handle
+	connected = true;
+
+}
+
+// Callback for connection failure
+void on_fail(connection_hdl hdl) {
+	std::cout << "Connection failed!" << std::endl;
+}
 
 // Product length in samples
 int productDurationSamples = 96000;
@@ -75,94 +117,55 @@ std::string generateTimestampID() {
 	return ss.str();
 }
 
+int networking(std::vector<double> sampleStorage) {
+	try {
 
-int websocket(std::vector<double> sampleStorage)
-{
-	// Initialize Winsock
-	WSADATA wsaData;
-	char receivedBuffer[1024] = { 0 };
-	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-		std::cerr << "WSAStartup failed. \n";
-		return 1;
-	}
-	
-		// Initialize socket
-	SOCKET sock = 0;
+		websocketpp::lib::error_code ec;
+		client::connection_ptr con = c.get_connection("ws://localhost:9000", ec);
 
-	while (true) { // This while loop is janked
-
-		// Define socket
-		sock = socket(AF_INET, SOCK_STREAM, 0);
-
-		// Test the validity of socket
-		if (sock == INVALID_SOCKET) {
-			std::cerr << "Socket creation failed.\n";
-			WSACleanup();
+		if (ec) {
+			std::cout << "Connection failed: " << ec.message() << std::endl;
 			return 1;
 		}
-		// Server address structure
-		sockaddr_in server_addr{};
-		server_addr.sin_family = AF_INET;
-		server_addr.sin_port = htons(PORT);
-		server_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
 
-		// Connect to server
-		if (connect(sock, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
-			std::cerr << "Connection to server failed.\n";
-			closesocket(sock);
-			std::this_thread::sleep_for(std::chrono::seconds(2));
-		}
-		else {
-			std::cout << "Connected!" << std::endl;
-			break;
-		}
-	} // end of while loop
+		c.connect(con);
 
-		// Check if we have enough data 
+		// thread splitting
+		std::thread websocket_thread([&]() { c.run(); });
+
+		// now the main thread is free to do other work
+		std::this_thread::sleep_for(std::chrono::seconds(2));
+		std::cout << "Main thread is still running!" << std::endl;
+
+		// Send a message while the WebSocket loop is running
+		while (!connected) {
+			std::this_thread::sleep_for(std::chrono::seconds(1));  // Avoid 100% CPU usage
+		}
+
+
 		if (sampleStorage.size() >= productDurationSamples) {
-			const char* message = "finish_now";
-			send(sock, message, strlen(message), 0);
-		closesocket(sock);
-		WSACleanup();
-		return 0;
+			std::string message = "finish_now";
+			c.send(hdl_global, message, websocketpp::frame::opcode::text);
+			task_done = true;
 		}
 
-		// Send command to Python server
-		const char* message = "run_function";
-		
-		// Send and check if command sent successfully
-		std::cout << sock << std::endl;
-		if (send(sock, message, strlen(message), 0) == SOCKET_ERROR) {
-			std::cerr << "Message send failed!" << std::endl;
-			closesocket(sock);
-			WSACleanup();
-			return 1;
+		// Join the thread when product if ready
+		if (task_done == true) {
+			websocket_thread.join();
 		}
 
+		std::string message = "run_function";
+		c.send(hdl_global, message, websocketpp::frame::opcode::text);
 
-		std::cout << "Command sent to Python server.\n";
+		websocket_thread.detach();
 
-		// Receive message
-		int bytesReceived = recv(sock, receivedBuffer, sizeof(receivedBuffer) - 1, 0);
-		if (bytesReceived > 0) {
-			receivedBuffer[bytesReceived] = '\0'; // NuLL-terminate received data
-			std::string str(receivedBuffer);
-			size_t pos = str.find(":");
-			std::string substring = str.substr(pos + 1);
-			std::cout << "Received from server: " << receivedBuffer << std::endl;
-			std::cout << "Chopped string: " << substring << std::endl;
-		}
-		else {
-			std::cerr << "Failed to receive message\n";
-		}
-
-		// Cleanup
-		closesocket(sock);
-		WSACleanup();
+	}
+	catch (const std::exception& e) {
+		std::cout << "Exception: " << e.what() << std::endl;
+	}
 
 	return 0;
 }
-
 
 
 
@@ -251,7 +254,6 @@ bool isGreaterThanAll(std::vector<double>& vec, double value, int counter,
 
 
 
-// vcpkg uses a very long path and might make the aws fail. Move it to a short path ex: "C:\src\vcpkg"
 
 void ReadAudioFileFromS3(const Aws::String& bucketName, const Aws::String& objectKey) {
 	Aws::SDKOptions options;
@@ -293,12 +295,14 @@ void ReadAudioFileFromS3(const Aws::String& bucketName, const Aws::String& objec
 
 int main()
 {
+	c.init_asio();
+	c.set_message_handler(&on_message);
+	c.set_open_handler(&on_open);
+	c.set_fail_handler(&on_fail);
+
 		const Aws::String bucketName = "firstdemoby";
 		const Aws::String objectKey = "fetch-test.mp3";
 
-
-		//std::string filename = "C:/Users/zacha/Desktop/empty/DeathGrips-Exmilitary-1-Beware.mp3";
-		//std::vector<double> audio_data = read_audio_file(filename);
 
 		const char* outputName = "output.wav";
 		int sampleRate = 44100;
@@ -315,7 +319,19 @@ int main()
 
 	while (sampleStorage.size() < productDurationSamples) {
 		std::cout << sampleStorage.size() << std::endl;
-		websocket(sampleStorage);
+
+		
+		//WEBSOCKET (LINUX)
+		networking(sampleStorage);
+
+		// Block main thread until condition_met == true
+		{
+			std::unique_lock<std::mutex> lock(mtx);
+			cv.wait(lock, [] { return condition_met; });
+		}
+
+		std::cout << "WE GOOD BABY" << std::endl;
+
 		ReadAudioFileFromS3(bucketName, objectKey);
 		std::vector<double> audio_data = read_audio_file("temp_audio.mp3"); // This is for AWS fetched
 		int n = audio_data.size();
@@ -462,8 +478,15 @@ int main()
 		fftw_free(real_input);
 		fftw_free(complex_output);
 
+		// i think this is how you relock a condition
+		std::lock_guard<std::mutex> lock(mtx);
+		condition_met = false;
+
 	}
-	websocket(sampleStorage);
+
+
+	// WEBSOCKET (LINUX)
+	networking(sampleStorage);
 
 	std::cout << "FINISHED" << std::endl;
 }

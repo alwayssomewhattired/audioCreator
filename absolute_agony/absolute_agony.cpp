@@ -15,10 +15,11 @@
 
 // Unique Key
 #include <iomanip>
-#include <ctime>
-#include <chrono>
-#include <sstream>
 
+// UUID
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/random_generator.hpp>
+#include <boost/uuid/uuid_io.hpp> // For converting UUID to a string
 
 // websockets (linux)
 //#include <websocketpp/config/asio_no_tls_client.hpp>
@@ -28,7 +29,7 @@
 #include <aws/core/Aws.h>
 #include <aws/s3/S3Client.h>
 #include <aws/s3/model/GetObjectRequest.h>
-//#include <aws/s3/model/putObjectRequest.h>
+//#include <aws/s3/model/putObjectRequest.h> // doesn't work on linux
 #include <aws/s3/model/PutObjectRequest.h>
 #include <aws/core/utils/Outcome.h>
 #include <aws/core/utils/DateTime.h>
@@ -164,31 +165,16 @@ void on_fail(connection_hdl hdl) {
 // Product length in samples
 int productDurationSamples = 96000;
 
-// timestamp-based id
-std::string generateTimestampID() {
-	// Get the current time from the system clock
-	auto now = std::chrono::system_clock::now();
-	auto time_t_now = std::chrono::system_clock::to_time_t(now);
+// UUID based id
+std::string generateUUID() {
+	boost::uuids::random_generator gen;
+	boost::uuids::uuid uuid = gen(); // Generates a random UUID
 
-	// Get the milliseconds part
-	auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-
-	// For Windows
-	//std::tm tm_now;
-	//localtime_s(&tm_now, &time_t_now); // Windows-safe localtime
-
-	// For Linux
-	// Convert the time_to to struct tm for local time (POSIX-safe version)
-	struct tm tm_now
-	localtime_r(&time_t_now, &tm_now); //Linux-safe localtime
-
-	std::stringstream ss;
-	ss << std::put_time(&tm_now, "%Y%m%d_%H%M%S") // Format: YYYYMMDD_HHMMSS
-		<< "_" << std::setfill('0') << std::setw(3) << milliseconds.count() //Add milliseconds
-		<< ".wav"; //.wav ofc :)
-
-	return ss.str();
+	// Convert the UUID to a string
+	return boost::uuids::to_string(uuid) + ".wav";
 }
+
+
 
 int networking(std::vector<double> sampleStorage) {
 	try {
@@ -582,8 +568,8 @@ int main()
 			config.region = "us-east-2";
 			Aws::S3::S3Client s3_client(config);
 
-			// productKey
-			std::string productKey = generateTimestampID();
+			// productKey (UUID)
+			std::string productKey = generateUUID();
 
 			// Create a putObjectRequest
 			Aws::S3::Model::PutObjectRequest object_request;

@@ -166,13 +166,21 @@ int productDurationSamples = 96000;
 
 // timestamp-based id
 std::string generateTimestampID() {
+	// Get the current time from the system clock
 	auto now = std::chrono::system_clock::now();
 	auto time_t_now = std::chrono::system_clock::to_time_t(now);
+
+	// Get the milliseconds part
 	auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
-	std::tm tm_now;
+	// For Windows
+	//std::tm tm_now;
 	//localtime_s(&tm_now, &time_t_now); // Windows-safe localtime
-	localtime_r(&tm_now, &time_t_now); //Linux-safe localtime
+
+	// For Linux
+	// Convert the time_to to struct tm for local time (POSIX-safe version)
+	struct tm tm_now
+	localtime_r(&time_t_now, &tm_now); //Linux-safe localtime
 
 	std::stringstream ss;
 	ss << std::put_time(&tm_now, "%Y%m%d_%H%M%S") // Format: YYYYMMDD_HHMMSS

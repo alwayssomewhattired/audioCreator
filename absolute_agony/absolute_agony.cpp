@@ -15,6 +15,9 @@
 
 // Unique Key
 #include <iomanip>
+#include <ctime>
+#include <chrono>
+#include <sstream>
 
 
 // websockets (linux)
@@ -48,6 +51,8 @@
 
 // JSON for messaging
 #include <json/json.h>
+
+
 
 
 
@@ -166,7 +171,8 @@ std::string generateTimestampID() {
 	auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
 	std::tm tm_now;
-	localtime_s(&tm_now, &time_t_now); // Windows-safe localtime
+	//localtime_s(&tm_now, &time_t_now); // Windows-safe localtime
+	localtime_r(&tm_now, &time_t_now); //Linux-safe localtime
 
 	std::stringstream ss;
 	ss << std::put_time(&tm_now, "%Y%m%d_%H%M%S") // Format: YYYYMMDD_HHMMSS

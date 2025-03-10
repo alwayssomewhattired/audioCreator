@@ -25,7 +25,8 @@
 #include <aws/core/Aws.h>
 #include <aws/s3/S3Client.h>
 #include <aws/s3/model/GetObjectRequest.h>
-#include <aws/s3/model/putObjectRequest.h>
+//#include <aws/s3/model/putObjectRequest.h>
+#include <aws/s3/model/PutObjectRequest.h>
 #include <aws/core/utils/Outcome.h>
 #include <aws/core/utils/DateTime.h>
 

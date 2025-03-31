@@ -123,6 +123,10 @@ client c;
 websocketpp::connection_hdl hdl_global;  // Store connection handle for sending messages
 
 
+//		GLOBAL VARS
+int controlNote;
+
+
 
 // Callback when a message is received
 void on_message(connection_hdl hdl, client::message_ptr msg) {
@@ -141,6 +145,13 @@ void on_message(connection_hdl hdl, client::message_ptr msg) {
 			std::lock_guard<std::mutex> lock(mtx);
 			condition_met = true;
 			cv.notify_one();
+		}
+		else if (received_message == "poverty_stricken") {
+			std::cout << "Controls have been received" << std::endl;
+			std::string noteControl = root.get("note", "").asString();
+			int noteNum = std::stoi(noteControl);
+			std::cout << "note: " << noteNum << std::endl;
+			controlNote = noteNum;
 		}
 	}
 	else {
@@ -181,8 +192,9 @@ int networking(std::vector<double> sampleStorage) {
 
 
 		websocketpp::lib::error_code ec;
-		//client::connection_ptr con = c.get_connection("ws://localhost:9000", ec); // This is for local development
-		client::connection_ptr con = c.get_connection("wss://www.samplerinfinite.com", ec); // This is for production
+		//client::connection_ptr con = c.get_connection("ws://localhost:9000", ec); // This is for local development... I don't think it's necessary anymore
+		client::connection_ptr con = c.get_connection("wss://0wl8ctuh90.execute-api.us-east-2.amazonaws.com/production/", ec); // This is for production
+
 
 		if (ec) {
 			std::cout << "Connection failed: " << ec.message() << std::endl;
@@ -406,7 +418,7 @@ int main()
 		sf_info.samplerate = sampleRate;
 		sf_info.channels = channels;
 		sf_info.format = format;
-		int chunk_size = 2048;
+		int chunk_size = 8192; // Good size for note-like values
 
 		//WEBSOCKET (LINUX)
 		networking(sampleStorage);
@@ -445,6 +457,7 @@ int main()
 		}
 
 		std::cout << "WE GOOD BABY" << std::endl;
+		std::cout << "note: " << controlNote << std::endl;
 
 
 
@@ -516,12 +529,12 @@ int main()
 				magnitudes[i] = std::sqrt(complex_output[i][0] * complex_output[i][0]
 					+ complex_output[i][1] * complex_output[i][1]);
 				// push freq/bins/magnitude to text file
-				//outputFile << "bin " << i << ": Frequency = " << freq << " Hz, magnitude = "
-					//<< magnitudes[i] << "\n";
+			/*	outputFile << "bin " << i << ": Frequency = " << freq << " Hz, magnitude = "
+					<< magnitudes[i] << "\n";*/
 			}
 
 			//check magnitudes for wanted frequencies
-			isGreaterThanAll(magnitudes, magnitudes[23], counter, audio_data, chunk_size);
+			isGreaterThanAll(magnitudes, magnitudes[controlNote], counter, audio_data, chunk_size);
 			//} // curly for output file
 
 		}
